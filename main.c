@@ -24,7 +24,7 @@ int main(int argc, char** argv) {
     heap_create(&h,0,NULL);
 
     // Maximum
-    int count = 100000000;
+    int count = 10000000;
 
     // Allocate a key and value
     int* key = (int*)malloc(count*sizeof(int));
