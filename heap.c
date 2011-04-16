@@ -23,7 +23,7 @@
                                       child->value = temp;               \
                                     }
 
-#define GET_ENTRY(index,map_table) (((heap_entry*)*(map_table+index/ENTRIES_PER_PAGE))+(index % ENTRIES_PER_PAGE))
+#define GET_ENTRY(index,table) ((heap_entry*)(table+index))
 
 
 
@@ -121,29 +121,12 @@ void heap_create(heap* h, int initial_size, int (*comp_func)(void*,void*)) {
     // Set active entries to 0
     h->active_entries = 0;
 
-
     // Determine how many pages of entries we need
-    h->minimum_pages = initial_size / ENTRIES_PER_PAGE + ((initial_size % ENTRIES_PER_PAGE > 0) ? 1 : 0);
+    h->allocated_pages = initial_size / ENTRIES_PER_PAGE + ((initial_size % ENTRIES_PER_PAGE > 0) ? 1 : 0);
+    h->minimum_pages = h->allocated_pages;
 
-    // Determine how big the map table should be
-    h->map_pages = sizeof(void*) * h->minimum_pages / PAGE_SIZE + 1;
-
-    // Allocate the map table
-    h->mapping_table = (void**)map_in_pages(h->map_pages);
-    assert(h->mapping_table != NULL);
-
-
-    // Allocate the entry pages
-    void* addr = map_in_pages(h->minimum_pages);
-    assert(addr != NULL);
-
-    // Add these to the map table
-    for (int i=0;i<h->minimum_pages;i++) {
-        *(h->mapping_table+i) = addr+(i*PAGE_SIZE);
-    }
-
-    // Set the allocated pages
-    h->allocated_pages = h->minimum_pages;
+    // Allocate the table
+    h->table = (void*)map_in_pages(h->allocated_pages);
 }
 
 
@@ -152,22 +135,13 @@ void heap_destroy(heap* h) {
     // Check that h is not null
     assert(h != NULL);
 
-    // Un-map all the entry pages
-    void** map_table = h->mapping_table;
-    assert(map_table != NULL);
-
-    for (int i=0; i < h->allocated_pages; i++) {
-        map_out_pages(*(map_table+i),1);
-    }
-
-    // Map out the map table
-    map_out_pages(map_table, h->map_pages);
+    // Map out the table
+    map_out_pages(h->table, h->allocated_pages);
 
     // Clear everything
     h->active_entries = 0;
     h->allocated_pages = 0;
-    h->map_pages = 0;
-    h->mapping_table = NULL;
+    h->table = NULL;
 }
 
 
@@ -178,24 +152,6 @@ int heap_size(heap* h) {
 }
 
 
-/* In-line version is much faster
-// Fetches the address of a heap_entry
-static heap_entry* heap_get_entry(int index, void** map_table) {
-    // Determine which page that index falls in
-    int entry_page = index / ENTRIES_PER_PAGE;
-
-    // Determine the offset into the page
-    int page_offset = index % ENTRIES_PER_PAGE;
-
-    // Get the address of the page
-    heap_entry* page_address = (heap_entry*)*(map_table+entry_page);
-
-    // Get the corrent entry
-    return page_address+page_offset;
-}
-*/
-
-
 // Gets the minimum element
 int heap_min(heap* h, void** key, void** value) {
     // Check the number of elements, abort if 0
@@ -203,7 +159,7 @@ int heap_min(heap* h, void** key, void** value) {
         return 0;
 
     // Get the 0th element
-    heap_entry* root = GET_ENTRY(0, h->mapping_table);
+    heap_entry* root = GET_ENTRY(0, h->table);
 
     // Set the key and value
     *key = root->key;
@@ -217,57 +173,37 @@ int heap_min(heap* h, void** key, void** value) {
 // Insert a new element
 void heap_insert(heap *h, void* key, void* value) {
     // Check if this heap is not destoyed
-    assert(h->mapping_table != NULL);
+    assert(h->table != NULL);
 
     // Check if we have room
     int max_entries = h->allocated_pages * ENTRIES_PER_PAGE;
     if (h->active_entries + 1 > max_entries) {
-        // Get the number of map pages
-        int map_pages = h->map_pages;
+        // Get the new number of entries we need
+        int new_size = h->allocated_pages * 2;
 
-        // We need a new page, do we have room?
-        int mapable_pages = map_pages * PAGE_SIZE / sizeof(void*);
-    
-        // Check if we need to grow the map table
-        if (h->allocated_pages + 1 > mapable_pages) {
-            // Allocate a new table, slightly bigger
-            void *new_table = map_in_pages(map_pages + 1);
+        // Map in a new table
+        heap_entry* new_table = map_in_pages(new_size);
 
-            // Get the old table
-            void *old_table = (void*)h->mapping_table;
+        // Copy the old entries, copy the entire pages
+        memcpy(new_table, h->table, h->allocated_pages*PAGE_SIZE);
+        
+        // Cleanup the old table
+        map_out_pages(h->table, h->allocated_pages);
 
-            // Copy the old entries to the new table
-            memcpy(new_table, old_table, map_pages * PAGE_SIZE);
-
-            // Delete the old table
-            map_out_pages(old_table, map_pages);
-
-            // Swap to the new table
-            h->mapping_table = (void**)new_table;
-
-            // Update the number of map pages
-            h->map_pages = map_pages + 1;
-        }
-
-        // Allocate a new page
-        void* addr = map_in_pages(1);
-
-        // Add this to the map
-        *(h->mapping_table+h->allocated_pages) = addr;
-
-        // Update the number of allocated pages
-        h->allocated_pages++;
+        // Switch to the new table
+        h->table = new_table;
+        h->allocated_pages = new_size;
     }
-
+    
     // Store the comparison function
     int (*cmp_func)(void*,void*) = h->compare_func;
 
-    // Store the map table address
-    void** map_table = h->mapping_table;
+    // Store the table address
+    heap_entry* table = h->table;
 
     // Get the current index
     int current_index = h->active_entries;
-    heap_entry* current = GET_ENTRY(current_index, map_table);
+    heap_entry* current = GET_ENTRY(current_index, table);
 
     // Loop variables
     int parent_index;
@@ -279,7 +215,7 @@ void heap_insert(heap *h, void* key, void* value) {
         parent_index = PARENT_ENTRY(current_index);
 
         // Get the parent entry
-        parent = GET_ENTRY(parent_index, map_table);
+        parent = GET_ENTRY(parent_index, table);
        
         // Compare the keys, and swap if we need to 
         if (cmp_func(key, parent->key) < 0) {
@@ -312,11 +248,11 @@ int heap_delmin(heap* h, void** key, void** value) {
         return 0;
 
     // Load in the map table
-    void** map_table = h->mapping_table;
+    heap_entry* table = h->table;
 
     // Get the root element
     int current_index = 0;
-    heap_entry* current = GET_ENTRY(current_index, map_table);
+    heap_entry* current = GET_ENTRY(current_index, table);
 
     // Store the outputs
     *key = current->key;
@@ -331,7 +267,7 @@ int heap_delmin(heap* h, void** key, void** value) {
     // If there are any other nodes, we may need to move them up
     if (h->active_entries > 0) {
         // Move the last element to the root
-        heap_entry* last = GET_ENTRY(entries,map_table);
+        heap_entry* last = GET_ENTRY(entries,table);
         current->key = last->key;
         current->value = last->value;
 
@@ -347,12 +283,12 @@ int heap_delmin(heap* h, void** key, void** value) {
 
         while (left_child_index = LEFT_CHILD(current_index), left_child_index < entries) {
             // Load the left child
-            left_child = GET_ENTRY(left_child_index, map_table);
+            left_child = GET_ENTRY(left_child_index, table);
 
             // We have a left + right child
             if (left_child_index+1 < entries) {
                 // Load the right child
-                right_child = GET_ENTRY((left_child_index+1), map_table);
+                right_child = GET_ENTRY((left_child_index+1), table);
 
                 // Find the smaller child
                 if (cmp_func(left_child->key, right_child->key) <= 0) {
@@ -400,15 +336,22 @@ int heap_delmin(heap* h, void** key, void** value) {
     int used_pages = entries / ENTRIES_PER_PAGE + ((entries % ENTRIES_PER_PAGE > 0) ? 1 : 0);
 
     // Allow one empty page, but not two
-    if (h->allocated_pages > used_pages + 1 && h->allocated_pages > h->minimum_pages) {
-        // Get the address of the page to delete
-        void* addr = *(map_table+h->allocated_pages-1);
+    if (h->allocated_pages / 2 > used_pages + 1 && h->allocated_pages / 2 >= h->minimum_pages) {
+        // Get the new number of entries we need
+        int new_size = h->allocated_pages / 2;
 
-        // Map out
-        map_out_pages(addr, 1);
+        // Map in a new table
+        heap_entry* new_table = map_in_pages(new_size);
 
-        // Decrement the allocated count
-        h->allocated_pages--;
+        // Copy the old entries, copy the entire pages
+        memcpy(new_table, h->table, used_pages*PAGE_SIZE);
+        
+        // Cleanup the old table
+        map_out_pages(h->table, h->allocated_pages);
+
+        // Switch to the new table
+        h->table = new_table;
+        h->allocated_pages = new_size;
     }
 
     // Success
@@ -423,11 +366,11 @@ void heap_foreach(heap* h, void (*func)(void*,void*)) {
     int entries = h->active_entries;
 
     heap_entry* entry;
-    void** map_table = h->mapping_table;
+    heap_entry* table = h->table;
 
     for (;index<entries;index++) {
         // Get the entry
-        entry = GET_ENTRY(index,map_table);
+        entry = GET_ENTRY(index,table);
 
         // Call the user function
         func(entry->key, entry->value);

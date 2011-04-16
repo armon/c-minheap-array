@@ -20,8 +20,7 @@ typedef struct heap {
     int active_entries;  // The number of entries in the heap
     int minimum_pages;   // The minimum number of pages to maintain, based on the initial cap.
     int allocated_pages; // The number of pages in memory that are allocated
-    int map_pages;       // The number of pages used for the map table
-    void** mapping_table; // Pointer to the table, which maps to the pages
+    heap_entry* table; // Pointer to the table, which maps to the pages
 } heap;
 
 // Functions
