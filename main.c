@@ -14,6 +14,9 @@ int main(int argc, char** argv) {
 
     // Maximum
     int count = 10000000; // 10M
+    if (argc > 1)
+      count = atoi(argv[1]); // Get the count as an argument
+    printf("Sorting array of %d random entries.\n", count);
 
     // Allocate a key and value
     int* key = (int*)malloc(count*sizeof(int));
