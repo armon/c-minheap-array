@@ -52,7 +52,7 @@ int main(int argc, char** argv) {
     printf("Real min: %d\n", min);
 
     // Try to get the minimum
-    while (heap_delmin(&h, &min_key, &min_val)) {
+    while (heap_delmin(&h, (void**)&min_key, (void**)&min_val)) {
         // Verify that the values are getting larger
         if (*prev_key > *min_key) {
             printf("Previous key is greater than current key!\n");
