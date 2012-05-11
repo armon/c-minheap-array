@@ -10,7 +10,7 @@
 #include <strings.h>
 #include "heap.h"
 
-// Helpful Macro's
+// Helpful Macros
 #define LEFT_CHILD(i)   ((i<<1)+1)
 #define RIGHT_CHILD(i)  ((i<<1)+2)
 #define PARENT_ENTRY(i) ((i-1)>>1)
